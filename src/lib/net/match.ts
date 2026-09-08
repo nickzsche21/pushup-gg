@@ -73,15 +73,16 @@ export async function queueForMatch(opts: {
   me: PeerInfo;
   durationS: number;
   ghostAfterMs: number;
+  variation?: string;
   onStatus?: (s: string) => void;
   signal?: AbortSignal;
 }): Promise<Found> {
-  const { me, durationS, ghostAfterMs, onStatus, signal } = opts;
+  const { me, durationS, ghostAfterMs, variation = "standard", onStatus, signal } = opts;
   const sb = supabase();
 
   if (!sb) {
     onStatus?.("No ladder configured — racing a ghost");
-    return { kind: "ghost", matchId: crypto.randomUUID(), ghost: await pickGhost(me, durationS) };
+    return { kind: "ghost", matchId: crypto.randomUUID(), ghost: await pickGhost(me, durationS, variation) };
   }
 
   const lobby = await freshChannel(sb, lobbyName(durationS), {
@@ -191,7 +192,7 @@ export async function queueForMatch(opts: {
           void finish(async () => ({
             kind: "ghost",
             matchId: crypto.randomUUID(),
-            ghost: await pickGhost(me, durationS),
+            ghost: await pickGhost(me, durationS, variation),
           }));
         }, ghostAfterMs);
       } catch (err) {
@@ -263,13 +264,14 @@ const SYNTHETIC_HANDLES = ["PACEMAKER", "THE_METRONOME", "RIVAL_01", "BENCHMARK"
  * suitable yet — day one, or an unusual duration — we synthesise a pacer at a
  * rate implied by the rating, so the mode still works on an empty database.
  */
-export async function pickGhost(me: PeerInfo, durationS: number): Promise<GhostRun> {
+export async function pickGhost(me: PeerInfo, durationS: number, variation = "standard"): Promise<GhostRun> {
   const sb = supabase();
   if (sb) {
     const { data } = await sb.rpc("pug_pick_ghost", {
       p_rating: me.rating,
       p_duration_s: durationS,
       p_exclude: me.id,
+      p_variation: variation,
     });
     const g = Array.isArray(data) ? data[0] : data;
     if (g && Array.isArray(g.timeline) && g.timeline.length > 0) {

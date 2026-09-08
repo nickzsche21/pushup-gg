@@ -3,23 +3,57 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { RankBadge } from "@/components/RankBadge";
-import { leaderboard, recordsBoard, type Player } from "@/lib/api";
+import { leaderboard, variationRecords, type Player, type VariationRecord } from "@/lib/api";
+import { VARIATIONS, variation as varyOf } from "@/lib/pose/variations";
 import { playerId } from "@/lib/identity";
 import { ladderEnabled } from "@/lib/supabase/client";
 
 type Board = "rating" | "records";
 
+interface Row {
+  id: string;
+  handle: string;
+  rating: number;
+  primary: number;
+  sub: string;
+}
+
 export default function LeaderboardPage() {
   const [board, setBoard] = useState<Board>("rating");
-  const [rows, setRows] = useState<Player[] | null>(null);
+  const [vary, setVary] = useState("standard");
+  const [rows, setRows] = useState<Row[] | null>(null);
   const [meId, setMeId] = useState("");
 
   useEffect(() => setMeId(playerId()), []);
 
   useEffect(() => {
     setRows(null);
-    void (board === "rating" ? leaderboard(50) : recordsBoard(50)).then(setRows);
-  }, [board]);
+    if (board === "rating") {
+      void leaderboard(50).then((ps: Player[]) =>
+        setRows(
+          ps.map((p) => ({
+            id: p.id,
+            handle: p.handle,
+            rating: p.rating,
+            primary: p.rating,
+            sub: `${p.wins}W · ${p.losses}L · ${p.total_reps} reps`,
+          })),
+        ),
+      );
+    } else {
+      void variationRecords(vary, 50).then((rs: VariationRecord[]) =>
+        setRows(
+          rs.map((r) => ({
+            id: r.player_id,
+            handle: r.handle,
+            rating: r.rating,
+            primary: r.best,
+            sub: `${varyOf(vary).name.toLowerCase()} push-ups, one set`,
+          })),
+        ),
+      );
+    }
+  }, [board, vary]);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 pb-24 pt-8">
@@ -48,6 +82,22 @@ export default function LeaderboardPage() {
         ))}
       </div>
 
+      {board === "records" && (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {VARIATIONS.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setVary(v.id)}
+              className={`display rounded-md border px-3 py-1 text-xs transition ${
+                v.id === vary ? "border-you/60 bg-you/10 text-you" : "border-line text-muted hover:text-text"
+              }`}
+            >
+              {v.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!ladderEnabled ? (
         <Empty>The ladder isn&apos;t configured on this deployment. Solo play still works.</Empty>
       ) : rows === null ? (
@@ -58,7 +108,9 @@ export default function LeaderboardPage() {
         </div>
       ) : rows.length === 0 ? (
         <Empty>
-          Nobody has finished a match yet. {board === "rating" ? "First win takes the top." : "First set takes the record."}
+          {board === "rating"
+            ? "Nobody has finished a match yet. First win takes the top."
+            : `No ${varyOf(vary).name.toLowerCase()} sets recorded yet. First one takes the record.`}
         </Empty>
       ) : (
         <ol className="mt-8 space-y-1.5">
@@ -77,14 +129,10 @@ export default function LeaderboardPage() {
                     {p.handle}
                     {mine && <span className="ml-2 text-xs text-you">you</span>}
                   </p>
-                  <p className="tabular text-xs text-muted">
-                    {p.wins}W · {p.losses}L · {p.total_reps} reps
-                  </p>
+                  <p className="tabular text-xs text-muted">{p.sub}</p>
                 </div>
                 <RankBadge rating={p.rating} size="sm" />
-                <span className="display tabular w-16 text-right text-xl">
-                  {board === "rating" ? p.rating : p.best_set}
-                </span>
+                <span className="display tabular w-16 text-right text-xl">{p.primary}</span>
               </li>
             );
           })}
@@ -93,7 +141,9 @@ export default function LeaderboardPage() {
 
       <p className="mt-8 text-sm leading-relaxed text-muted">
         Ratings start at 1000 and move on an Elo curve weighted by margin — a 21–3 win moves you
-        further than a 21–20 one. Sets that fail the plausibility floor never reach this page.
+        further than a 21–20 one. Only standard push-ups move a rating, so the ladder compares like
+        with like; every other variation gets its own records board. Sets that fail the
+        plausibility floor never reach this page.
       </p>
     </main>
   );

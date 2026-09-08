@@ -16,6 +16,13 @@ const MODES = [
     accent: "var(--color-you)",
   },
   {
+    href: "/train",
+    kicker: "Training",
+    title: "Actually get better",
+    body: "Sets prescribed against your tested max, moving every week. Because a fixed forty a day stops working almost immediately.",
+    accent: "#6aa8ff",
+  },
+  {
     href: "/play?mode=solo&d=0",
     kicker: "Max set",
     title: "To failure",
@@ -36,6 +43,8 @@ const GATES = [
   ["Lockout", "Arms back past 155° at the top. Half-way up is half a rep, which is none."],
   ["Body line", "Shoulder–hip–ankle held above 152°. Sagging or piking voids the rep."],
   ["Tempo", "Nothing under 380ms. Bouncing off the floor is not a push-up."],
+  ["Elbow flare", "Upper arm against the torso, measured at the bottom. Winged elbows are logged and coached, and void the rep under strict rules."],
+  ["Lowering speed", "Each rep is split into the way down and the way up. The descent is where the strength is, and it is the half everyone skips."],
 ];
 
 export default function Home() {
@@ -64,9 +73,14 @@ export default function Home() {
         <span className="display text-xl tracking-tight">
           PUSHUP<span className="text-you">.GG</span>
         </span>
-        <Link href="/leaderboard" className="display text-sm text-muted transition hover:text-text">
-          Ladder →
-        </Link>
+        <nav className="flex items-center gap-5">
+          <Link href="/train" className="display text-sm text-muted transition hover:text-text">
+            Training
+          </Link>
+          <Link href="/leaderboard" className="display text-sm text-muted transition hover:text-text">
+            Ladder →
+          </Link>
+        </nav>
       </header>
 
       <section className="mt-14 sm:mt-20">
@@ -128,7 +142,7 @@ export default function Home() {
         )}
       </section>
 
-      <section className="mt-6 grid gap-4 sm:grid-cols-3">
+      <section className="mt-6 grid gap-4 sm:grid-cols-2">
         {MODES.map((m) => (
           <Link
             key={m.href}
@@ -146,6 +160,22 @@ export default function Home() {
             />
           </Link>
         ))}
+      </section>
+
+      <section className="mt-16">
+        <div className="panel flex flex-wrap items-center gap-x-6 gap-y-3 p-5">
+          <div className="min-w-[12rem] flex-1">
+            <h2 className="display text-2xl">It talks to you</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted">
+              Your face points at the floor during a push-up, which makes a scoreboard useless at
+              the exact moment it has something to say. So the count is spoken, every no-rep is
+              spoken with its reason, and form faults are called out while they are happening.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2 text-3xl" aria-hidden>
+            🔊
+          </div>
+        </div>
       </section>
 
       <section className="mt-16">

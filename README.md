@@ -19,6 +19,52 @@ cut short, in front of an opponent, while it's happening.
 
 So the whole product is the referee.
 
+## What people said about the alternatives
+
+Every feature past the referee came out of reading what people actually
+complain about, rather than guessing. The two closest products on Hacker News
+([a webcam push-up counter](https://news.ycombinator.com/item?id=16095477),
+134 points, and [a real-time form corrector](https://news.ycombinator.com/item?id=43331940),
+45 points) plus fitness.stackexchange sorted by views:
+
+**Every counter is trivially cheatable, and people notice within one comment.**
+*"So if I move the phone up and down in front of my face it will count
+push-ups?"* · *"I just moved up and down and it detected that as a push up"* ·
+*"I managed to fool it by hand movements"* · *"I was able to fool it by doing
+pushups off my desk."* And the flip side, unprompted: *"has the added benefit of
+not letting people count those half-pushups where you're still 12 inches off the
+ground."* → the four gates.
+
+**Your face points at the floor.** *"Can this app give an audible alert when
+form falls beyond threshold?"* · *"This is also easy to coach in real time with
+audio cues."* A visual HUD is unreadable at exactly the moment it has something
+to say. → [the coach](#it-talks-to-you).
+
+**Nobody can work out where to put the camera.** *"You have to be fairly close
+to the screen for it to count"* · *"there is no space near my webcam that I can
+knock out some pushups"* · and the author himself: *"I'll look at ways to help
+people get into that position first time round."* → [the framing coach](#the-framing-coach).
+
+**Tempo is the top form request, and the leading paid app doesn't have it.**
+*"Is pace considered in form? Slowing down the eccentric motion is one of the
+most important things."* Author's reply: *"No, pace is not considered in our form
+feedback."* → per-rep eccentric/concentric split.
+
+**The real problem isn't counting, it's plateauing.** *"My push-ups don't
+increase"* — 24,760 views. *"Why is 40 pushups a day not doing anything?"* —
+18,967 views. → [training](#training).
+
+**Beginners are excluded entirely.** Most people cannot do one clean full
+push-up, and every one of these apps refuses to count anything else. → knee and
+incline variations, with the body line measured to the right joint.
+
+**Also:** elbow flare is a named fault nobody detects; counting *down* toward a
+target is what gets people through a set (*"chunking and counting down helped go
+through them"*); the local-only processing was praised without being asked
+about; and one reported bug worth stealing — *"the webcam is still turned on
+after the pushup detection is done"* — which is why the camera is released the
+moment a set ends here.
+
 ## What counts as a rep
 
 Four gates run on every repetition. Failing one is announced, with the reason,
@@ -30,9 +76,18 @@ rather than silently dropped:
 | **Lockout** | elbow angle returns past 155° | (rep doesn't close) |
 | **Body line** | shoulder–hip–ankle held above 152° | `NO REP · HIPS DROPPED` |
 | **Tempo** | at least 380ms floor-to-lockout | `NO REP · TOO FAST` |
+| **Elbow flare** | upper arm within 82° of the torso | `NO REP · ELBOWS OUT` (strict only) |
 
 Losing tracking mid-rep voids the attempt (`NO REP · LOST YOU`) — otherwise you
 could drop out of frame at the bottom and reappear locked out at the top.
+
+Flare is measured on every rep and coached out loud, but only voids the rep
+under strict rules. It is the most common fault there is, and an app that
+refuses to count a beginner's honest work teaches them nothing.
+
+Every rep also records its **eccentric and concentric halves** separately.
+Nothing is gated on them — they feed the form report, because "you dropped in
+0.3 seconds" is the most useful thing anyone can tell you about a push-up.
 
 Three strictness presets exist (`casual`, `ranked`, `strict`); ranked is the one
 the ladder uses. Pass `?s=casual` to play a looser game.
@@ -53,6 +108,72 @@ animate the on-screen gauge.
 Depth credit comes from the **second**-lowest raw reading of the rep, so one bad
 frame cannot manufacture a rep and a genuine turnaround isn't clipped by the
 filter.
+
+## It talks to you
+
+The count is spoken. Every no-rep is spoken with its reason — "lower", "hips",
+"slower", "elbows in". Faults are called out while they're still happening, and
+the last ten seconds of a match are announced. Tones carry the timing because
+speech synthesis is too slow to land on a rep: the blip fires as the rep closes
+and the number follows it.
+
+Browsers won't start audio without a real gesture, so it arms on the first tap
+anywhere on the page, and there's an explicit toggle on every setup screen.
+
+## The framing coach
+
+Instead of "get into position", it names the actual problem and what to do:
+
+- *"Put the camera at your side"* — head-on, it cannot see your elbows bend,
+  which is the entire measurement
+- *"Your legs are out of shot"* — the body-line check needs hip to ankle
+- *"Camera closer"* / *"Camera back"* — from how much of the frame you fill
+- *"I can't see you"*
+
+Verdicts are held for 700ms before being acted on, because raw per-frame
+analysis flickers and advice that rewrites itself thirty times a second is
+unreadable. The match won't start until framing is good *and* you've held a
+plank for 1.2s.
+
+## Training
+
+The ranked ladder answers "who is better". It does not answer "why am I not
+getting better", which is what people actually ask. So there's a second half:
+
+- **Test** your max set to failure. Everything is a percentage of that, not of
+  a number off the internet.
+- **Volume** — five sets from 65% down to 50%, roughly 3× your best set of total
+  work, none of it to failure.
+- **Ladder** — 1,2,3…up and back down, resting four seconds per rep.
+  Accumulates real volume while every single set stays easy.
+- **Every minute** — a fixed number at the top of each minute for ten minutes.
+  The rest shrinks as you slow down, which is the point.
+
+Those three rotate, each week adds 4% to the working percentages (capped at
+32%), and a re-test falls due every 21 days. Streaks count distinct days, not
+sessions — three sets on Tuesday is still one day of showing up.
+
+Target sets count **down**, and the coach speaks the number remaining.
+
+## Variations
+
+Knee, incline, standard, wide, diamond, decline, archer.
+
+Only the knee variation changes what the referee measures: its body line runs
+shoulder–hip–**knee**, because the shins leave the floor by design and an ankle
+reference would fail every rep. The rest keep the same gates — from a side-on
+camera you cannot see hand spacing, because the wrists overlap, so the app
+records the variation you chose rather than pretending to verify it. Each gets
+its own records board so that stays honest, and only standard push-ups move a
+rating.
+
+## The form report
+
+After every set, per rep: depth against the gate, and the lowering/pressing
+split as a stacked bar. Then averages, total time under tension, and exactly one
+thing to fix — chosen by whichever signal is furthest out of line, whether
+that's a repeated no-rep reason, a rushed descent, flared elbows, or depth
+drifting shallower as the set wears on.
 
 ## Ratings
 
@@ -148,7 +269,14 @@ reps and dropped hips so the no-rep path is visible.
   tab, so the camera stops counting while the clock runs on. A screen wake lock
   is held during a match, and the result tells you if it happened.
 - **One camera angle.** Depth is measured side-on. Filming head-on hides the
-  elbow, and the referee will mostly refuse to count.
+  elbow, and the referee will mostly refuse to count — the framing coach says so
+  rather than letting you find out after a set.
+- **Variations are declared, not verified.** A side-on camera cannot see hand
+  spacing. Selecting "diamond" and doing wide push-ups will be recorded as
+  diamond.
+- **Depth costs two frames.** Credit requires two consecutive readings past the
+  gate, which is what stops a single bad landmark counting. At 30fps that is
+  about 5° of extra depth on a normal rep and more on a fast one.
 - **Rate limiting.** There isn't any. Nothing stops a script from submitting a
   stream of plausible matches; the floor only bounds what each one is worth.
 
@@ -157,12 +285,17 @@ reps and dropped hips so the no-rep path is visible.
 ```
 src/lib/pose/repCounter.ts   the referee — state machine and form gates
 src/lib/pose/geometry.ts     angle maths and the median filter
+src/lib/pose/variations.ts   seven variations and their gate overrides
 src/lib/pose/simulator.ts    synthetic athlete, shared by demo mode and tests
+src/lib/coach/audio.ts       spoken counts, no-rep reasons, tones
+src/lib/coach/framing.ts     camera setup diagnosis
+src/lib/training.ts          progression, plans, streaks
 src/lib/elo.ts               margin-weighted ratings, plausibility floor
 src/lib/net/match.ts         lobby, pairing, match channel, ghosts
 src/lib/shareCard.ts         the 1080×1920 result card
 src/components/CameraStage   camera, pose loop, overlay painting
-scripts/test-counter.ts      25 assertions over the above
+src/components/FormReport    per-rep depth and tempo, and the one thing to fix
+scripts/test-counter.ts      60 assertions over the above
 ```
 
 ## Licence

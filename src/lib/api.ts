@@ -79,6 +79,7 @@ export interface SubmitArgs {
   timeline: number[];
   opponent?: { id: string | null; rating: number; matches: number; reps: number; noReps: number; handle: string };
   ghostOf?: string | null;
+  variation?: string;
 }
 
 export interface SubmitResult {
@@ -141,6 +142,7 @@ export async function submitResult(a: SubmitArgs): Promise<SubmitResult> {
     p_ghost_of: a.ghostOf ?? null,
     p_ghost_handle: ghost ? (opp?.handle ?? null) : null,
     p_timeline: a.timeline,
+    p_variation: a.variation ?? "standard",
   });
 
   if (error) return { applied: false, flagged: null, delta: 0, ratingAfter: a.me.rating };
@@ -184,6 +186,27 @@ export async function leaderboard(limit = 50): Promise<Player[]> {
     .order("rating", { ascending: false })
     .limit(limit);
   return (data ?? []) as Player[];
+}
+
+export interface VariationRecord {
+  variation: string;
+  player_id: string;
+  handle: string;
+  rating: number;
+  best: number;
+}
+
+/** Biggest set for one variation. A knee push-up is not a diamond push-up. */
+export async function variationRecords(variation: string, limit = 50): Promise<VariationRecord[]> {
+  const sb = supabase();
+  if (!sb) return [];
+  const { data } = await sb
+    .from("pug_variation_records")
+    .select("*")
+    .eq("variation", variation)
+    .order("best", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as VariationRecord[];
 }
 
 export async function recordsBoard(limit = 25): Promise<Player[]> {

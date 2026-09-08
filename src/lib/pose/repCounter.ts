@@ -1,12 +1,20 @@
 import { AngleFilter, L, Pt, angleDeg, midpoint, visible } from "./geometry";
 
-export type NoRepReason = "shallow" | "hips" | "fast" | "lost";
+export type NoRepReason = "shallow" | "hips" | "fast" | "lost" | "flare";
 
 export interface RepEvent {
   index: number;
   tMs: number;
   depthDeg: number;
   durationMs: number;
+  /** Time spent lowering. The half that builds strength, and the half people skip. */
+  eccentricMs: number;
+  /** Time spent pressing back up. */
+  concentricMs: number;
+  /** Worst shoulder–elbow–torso angle at the bottom. ~45° is tucked, ~90° is flared. */
+  flareDeg: number;
+  /** Worst body line held during the rep. */
+  bodyLineDeg: number;
 }
 
 export interface NoRepEvent {
@@ -20,8 +28,10 @@ export interface Frame {
   elbow: number;
   /** Smoothed elbow angle. Nicer to animate, too laggy to judge with. */
   elbowSmooth: number;
-  /** Shoulder–hip–ankle angle, degrees. 180 = a perfect plank. */
+  /** Shoulder–hip–ankle (or knee) angle. 180 = a perfect plank. */
   bodyLine: number;
+  /** Upper arm against the torso. High means the elbows are winging out. */
+  flare: number;
   /** How far through the current rep, 0 (top) → 1 (at depth). */
   depthPct: number;
   tracked: boolean;
@@ -43,12 +53,27 @@ export interface CounterConfig {
   /** Minimum shoulder–hip–ankle angle held through the rep. */
   bodyLineMin: number;
   minVisibility: number;
+  /** Upper arm to torso angle allowed at the bottom. */
+  maxFlare: number;
+  /** Whether exceeding maxFlare voids the rep or only warns. */
+  flareVoids: boolean;
+  /** Which joint closes the body line. Knee push-ups lift the shins by design. */
+  bodyLineJoint: "ankle" | "knee";
 }
 
 export const STRICTNESS = {
-  casual: { topAngle: 150, bottomAngle: 105, descendMark: 135, minRepMs: 300, bodyLineMin: 140, minVisibility: 0.4 },
-  ranked: { topAngle: 155, bottomAngle: 95, descendMark: 140, minRepMs: 380, bodyLineMin: 152, minVisibility: 0.5 },
-  strict: { topAngle: 162, bottomAngle: 85, descendMark: 145, minRepMs: 450, bodyLineMin: 160, minVisibility: 0.6 },
+  casual: {
+    topAngle: 150, bottomAngle: 105, descendMark: 135, minRepMs: 300,
+    bodyLineMin: 140, minVisibility: 0.4, maxFlare: 100, flareVoids: false, bodyLineJoint: "ankle",
+  },
+  ranked: {
+    topAngle: 155, bottomAngle: 95, descendMark: 140, minRepMs: 380,
+    bodyLineMin: 152, minVisibility: 0.5, maxFlare: 82, flareVoids: false, bodyLineJoint: "ankle",
+  },
+  strict: {
+    topAngle: 162, bottomAngle: 85, descendMark: 145, minRepMs: 450,
+    bodyLineMin: 160, minVisibility: 0.6, maxFlare: 70, flareVoids: true, bodyLineJoint: "ankle",
+  },
 } satisfies Record<string, CounterConfig>;
 
 export type Strictness = keyof typeof STRICTNESS;
@@ -61,6 +86,10 @@ export type Strictness = keyof typeof STRICTNESS;
  * taking longer than a bounce. Anything that completes the round trip but
  * fails a gate is emitted as a no-rep with the reason, because "that one
  * didn't count, and here's why" is the whole point of a referee.
+ *
+ * Elbow flare and the eccentric/concentric split are measured on every rep but
+ * only void it under strict rules — flare is the most common fault there is,
+ * and an app that refuses to count a beginner's honest work teaches nothing.
  */
 export class RepCounter {
   private cfg: CounterConfig;
@@ -69,12 +98,14 @@ export class RepCounter {
 
   private phase: Phase = "top";
   private repStartMs = 0;
+  private bottomAtMs = 0;
   // Two lowest *raw* elbow readings this rep. Depth is credited from the
   // second lowest, so a single bad frame can't manufacture a rep, and a real
   // turnaround isn't clipped by the filter the way a windowed minimum is.
   private low1 = 180;
   private low2 = 180;
   private worstBodyLineThisRep = 180;
+  private flareAtBottom = 0;
   private lostSinceMs: number | null = null;
   private inPositionSinceMs: number | null = null;
 
@@ -82,11 +113,15 @@ export class RepCounter {
   noReps: NoRepEvent[] = [];
 
   constructor(
-    strictness: Strictness = "ranked",
+    preset: Strictness | CounterConfig = "ranked",
     private onRep?: (r: RepEvent) => void,
     private onNoRep?: (n: NoRepEvent) => void,
   ) {
-    this.cfg = { ...STRICTNESS[strictness] };
+    this.cfg = typeof preset === "string" ? { ...STRICTNESS[preset] } : { ...preset };
+  }
+
+  get config(): CounterConfig {
+    return this.cfg;
   }
 
   get count() {
@@ -100,6 +135,7 @@ export class RepCounter {
     this.low1 = 180;
     this.low2 = 180;
     this.worstBodyLineThisRep = 180;
+    this.flareAtBottom = 0;
     this.lostSinceMs = null;
     this.inPositionSinceMs = null;
     this.elbowFilter.reset();
@@ -130,17 +166,32 @@ export class RepCounter {
     }
     if (elbowAngles.length === 0) return this.lost(tMs);
 
-    // Ankles disappear from frame constantly (people crop their feet out), so
-    // fall back to the knee before giving up on the body-line check entirely.
     const shoulder = this.pair(world, L.L_SHOULDER, L.R_SHOULDER, v);
     const hip = this.pair(world, L.L_HIP, L.R_HIP, v);
-    const ankle = this.pair(world, L.L_ANKLE, L.R_ANKLE, v) ?? this.pair(world, L.L_KNEE, L.R_KNEE, v);
     if (!shoulder || !hip) return this.lost(tMs);
+
+    // Knee push-ups lift the shins deliberately, so their body line closes at
+    // the knee. Everything else prefers the ankle and falls back to the knee,
+    // because people crop their feet out of frame constantly.
+    const knee = this.pair(world, L.L_KNEE, L.R_KNEE, v);
+    const tail =
+      this.cfg.bodyLineJoint === "knee" ? knee : (this.pair(world, L.L_ANKLE, L.R_ANKLE, v) ?? knee);
+
+    // Elbow flare: upper arm against the torso, at the shoulder. Read the most
+    // forgiving visible side — in a side-on view the far arm is occluded, and a
+    // bad landmark there would invent a fault that isn't happening.
+    const flares: number[] = [];
+    for (const [s, e] of [[L.L_SHOULDER, L.L_ELBOW], [L.R_SHOULDER, L.R_ELBOW]] as const) {
+      if (visible(world[s], v) && visible(world[e], v) && hip) {
+        flares.push(angleDeg(world[e], world[s], hip));
+      }
+    }
+    const flare = flares.length ? Math.min(...flares) : 0;
 
     const rawElbow = Math.min(...elbowAngles);
     const elbowF = this.elbowFilter.push(rawElbow);
     const elbow = elbowF.value;
-    const bodyLine = ankle ? this.bodyFilter.push(angleDeg(shoulder, hip, ankle)).value : 180;
+    const bodyLine = tail ? this.bodyFilter.push(angleDeg(shoulder, hip, tail)).value : 180;
 
     this.lostSinceMs = null;
 
@@ -158,7 +209,7 @@ export class RepCounter {
     if (inPosition) this.inPositionSinceMs ??= tMs;
     else this.inPositionSinceMs = null;
 
-    this.step(elbow, rawElbow, bodyLine, tMs);
+    this.step(elbow, rawElbow, bodyLine, flare, tMs);
 
     const span = this.cfg.descendMark - this.cfg.bottomAngle;
     const depthPct = Math.min(1, Math.max(0, (this.cfg.descendMark - elbow) / span));
@@ -167,6 +218,7 @@ export class RepCounter {
       elbow,
       elbowSmooth: elbowF.smooth,
       bodyLine,
+      flare,
       depthPct,
       tracked: true,
       inPosition,
@@ -179,13 +231,15 @@ export class RepCounter {
     return this.inPositionSinceMs !== null && tMs - this.inPositionSinceMs >= ms;
   }
 
-  private step(elbow: number, rawElbow: number, bodyLine: number, tMs: number) {
+  private step(elbow: number, rawElbow: number, bodyLine: number, flare: number, tMs: number) {
     const c = this.cfg;
 
     if (this.phase !== "top") {
       if (rawElbow < this.low1) {
         this.low2 = this.low1;
         this.low1 = rawElbow;
+        this.bottomAtMs = tMs;
+        this.flareAtBottom = Math.max(this.flareAtBottom, flare);
       } else if (rawElbow < this.low2) {
         this.low2 = rawElbow;
       }
@@ -197,9 +251,11 @@ export class RepCounter {
         if (elbow < c.descendMark) {
           this.phase = "descending";
           this.repStartMs = tMs;
+          this.bottomAtMs = tMs;
           this.low1 = rawElbow;
           this.low2 = rawElbow;
           this.worstBodyLineThisRep = bodyLine;
+          this.flareAtBottom = flare;
         }
         break;
 
@@ -218,12 +274,17 @@ export class RepCounter {
           const durationMs = tMs - this.repStartMs;
           if (durationMs < c.minRepMs) this.emitNoRep(tMs, "fast");
           else if (this.worstBodyLineThisRep < c.bodyLineMin) this.emitNoRep(tMs, "hips");
+          else if (c.flareVoids && this.flareAtBottom > c.maxFlare) this.emitNoRep(tMs, "flare");
           else {
             const rep: RepEvent = {
               index: this.reps.length + 1,
               tMs,
               depthDeg: Math.round(this.low2),
               durationMs: Math.round(durationMs),
+              eccentricMs: Math.round(Math.max(0, this.bottomAtMs - this.repStartMs)),
+              concentricMs: Math.round(Math.max(0, tMs - this.bottomAtMs)),
+              flareDeg: Math.round(this.flareAtBottom),
+              bodyLineDeg: Math.round(this.worstBodyLineThisRep),
             };
             this.reps.push(rep);
             this.onRep?.(rep);
@@ -268,6 +329,7 @@ export class RepCounter {
       elbow: 180,
       elbowSmooth: 180,
       bodyLine: 180,
+      flare: 0,
       depthPct: 0,
       tracked: false,
       inPosition: false,

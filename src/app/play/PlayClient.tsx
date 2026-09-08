@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CameraStage from "@/components/CameraStage";
 import MatchHud, { type Side } from "@/components/MatchHud";
 import { RankBadge } from "@/components/RankBadge";
 import { cachedPlayer, submitResult, syncPlayer, type Player } from "@/lib/api";
 import { handle as getHandle, playerId } from "@/lib/identity";
-import type { NoRepEvent, NoRepReason, RepEvent, Strictness } from "@/lib/pose/repCounter";
+import type { CounterConfig, NoRepEvent, NoRepReason, RepEvent, Strictness } from "@/lib/pose/repCounter";
+import { configFor, variation } from "@/lib/pose/variations";
+import { Coach, loadCoachOptions, saveCoachOptions, type CoachOptions } from "@/lib/coach/audio";
+import type { Framing } from "@/lib/coach/framing";
+import FormReport from "@/components/FormReport";
 import {
   joinRoom,
   newRoomCode,
@@ -47,6 +51,8 @@ export default function PlayClient() {
   const strictness: Strictness = (params.get("s") as Strictness) ?? "ranked";
   const urlCode = params.get("code")?.toUpperCase() ?? "";
   const simulate = params.get("sim") === "1";
+  const variationId = params.get("v") ?? "standard";
+  const config = useMemo(() => configFor(strictness, variationId), [strictness, variationId]);
 
   const [me, setMe] = useState<Player | null>(null);
   const [phase, setPhase] = useState<Phase>("connecting");
@@ -63,6 +69,9 @@ export default function PlayClient() {
   const [codeDraft, setCodeDraft] = useState("");
   const [shareState, setShareState] = useState<"idle" | "working" | "done">("idle");
   const [fatal, setFatal] = useState<string | null>(null);
+  const [framing, setFraming] = useState<Framing | null>(null);
+  const [coachOpts, setCoachOpts] = useState<CoachOptions | null>(null);
+  const [audioArmed, setAudioArmed] = useState(false);
 
   const matchIdRef = useRef<string>("");
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -86,8 +95,45 @@ export default function PlayClient() {
   const abortRef = useRef<AbortController | null>(null);
   const hiddenMsRef = useRef(0);
   const finishedRef = useRef(false);
+  const coachRef = useRef<Coach | null>(null);
+  const repDetailRef = useRef<RepEvent[]>([]);
+  const noRepDetailRef = useRef<NoRepEvent[]>([]);
+  const warnedRef = useRef(false);
 
   oppRef.current = opp;
+
+  // ---- the coach ---------------------------------------------------------
+  // Audio needs a real gesture before a browser will let it make a sound, so
+  // arm it on the first tap or key anywhere on the page as well as from the
+  // explicit toggle. Speech often works without one; tones never do.
+  useEffect(() => {
+    const opts = loadCoachOptions();
+    setCoachOpts(opts);
+    const coach = new Coach(opts);
+    coachRef.current = coach;
+
+    const arm = () => {
+      void coach.arm().then(() => setAudioArmed(true));
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+    };
+    window.addEventListener("pointerdown", arm, { once: true });
+    window.addEventListener("keydown", arm, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+      coach.dispose();
+      coachRef.current = null;
+    };
+  }, []);
+
+  const setCoach = (next: CoachOptions) => {
+    setCoachOpts(next);
+    saveCoachOptions(next);
+    if (coachRef.current) coachRef.current.options = next;
+    if (!audioArmed) void coachRef.current?.arm().then(() => setAudioArmed(true));
+  };
 
   // ---- identity ----------------------------------------------------------
   useEffect(() => {
@@ -212,6 +258,7 @@ export default function PlayClient() {
           me: peer,
           durationS,
           ghostAfterMs: GHOST_AFTER_MS,
+          variation: variationId,
           onStatus: setStatus,
           signal: ac.signal,
         });
@@ -245,7 +292,7 @@ export default function PlayClient() {
       cancelled = true;
       ac.abort();
     };
-  }, [identified, mode, durationS, code, wireChannel]);
+  }, [identified, mode, durationS, code, variationId, wireChannel]);
 
   useEffect(
     () => () => {
@@ -276,14 +323,19 @@ export default function PlayClient() {
   useEffect(() => {
     if (phase !== "countdown") return;
     setCountdown(3);
+    coachRef.current?.countdown(3);
     const t = setInterval(() => {
       setCountdown((n) => {
+        coachRef.current?.countdown(n - 1);
         if (n <= 1) {
           clearInterval(t);
           timelineRef.current = [];
           noRepCountRef.current = 0;
           hiddenMsRef.current = 0;
           finishedRef.current = false;
+          warnedRef.current = false;
+          repDetailRef.current = [];
+          noRepDetailRef.current = [];
           oppCurveRef.current = [];
           oppRepsRef.current = 0;
           oppNoRepsRef.current = 0;
@@ -383,7 +435,18 @@ export default function PlayClient() {
           }
         : undefined,
       ghostOf: ghost?.playerId ?? null,
+      variation: variationId,
     });
+
+    const verdict =
+      mode === "solo"
+        ? `${timelineRef.current.length} reps`
+        : timelineRef.current.length > oppFinal
+          ? `You win, ${timelineRef.current.length} to ${oppFinal}`
+          : timelineRef.current.length < oppFinal
+            ? `You lose, ${timelineRef.current.length} to ${oppFinal}`
+            : `Draw at ${oppFinal}`;
+    coachRef.current?.finish(verdict);
 
     setResult({ delta: r.delta, ratingAfter: r.ratingAfter, flagged: r.flagged });
     setMe({ ...current, rating: r.ratingAfter, matches: current.matches + (mode === "solo" ? 0 : 1) });
@@ -403,6 +466,11 @@ export default function PlayClient() {
       if (g) setOppReps(g.timeline.filter((t) => t <= el).length);
 
       if (durationS > 0) {
+        const left = durationS * 1000 - el;
+        if (left <= 10_000 && !warnedRef.current) {
+          warnedRef.current = true;
+          coachRef.current?.say("Ten seconds");
+        }
         if (el >= durationS * 1000) void finish();
       } else {
         const since = lastRepAtRef.current ? now - lastRepAtRef.current : el;
@@ -423,6 +491,8 @@ export default function PlayClient() {
   const onRep = useCallback((r: RepEvent) => {
     const t = Math.round(r.tMs - startPerfRef.current);
     timelineRef.current.push(t);
+    repDetailRef.current.push(r);
+    coachRef.current?.rep(timelineRef.current.length);
     lastRepAtRef.current = r.tMs;
     setMyReps(timelineRef.current.length);
     if (channelRef.current) sendState(channelRef.current, { reps: timelineRef.current.length, noReps: noRepCountRef.current });
@@ -430,8 +500,15 @@ export default function PlayClient() {
 
   const onNoRep = useCallback((n: NoRepEvent) => {
     noRepCountRef.current += 1;
+    noRepDetailRef.current.push(n);
+    coachRef.current?.noRep(n.reason);
     setNoRep({ reason: n.reason, key: Date.now() });
     setTimeout(() => setNoRep((c) => (c && Date.now() - c.key > 1100 ? null : c)), 1200);
+  }, []);
+
+  const onFault = useCallback((fault: "hips" | "flare" | null) => {
+    if (fault === "hips") coachRef.current?.cue("Straighten your body");
+    else if (fault === "flare") coachRef.current?.cue("Tuck your elbows in");
   }, []);
 
   // ---- share -------------------------------------------------------------
@@ -497,14 +574,19 @@ export default function PlayClient() {
 
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-black">
-      <CameraStage
-        simulate={simulate}
-        strictness={strictness}
-        armed={phase === "live"}
-        onRep={onRep}
-        onNoRep={onNoRep}
-        onInPosition={handleInPosition}
-      />
+      {/* Unmounted once the match is over so the camera light actually goes out. */}
+      {phase !== "done" && (
+        <CameraStage
+          simulate={simulate}
+          config={config}
+          armed={phase === "live"}
+          onRep={onRep}
+          onNoRep={onNoRep}
+          onFault={onFault}
+          onFraming={setFraming}
+          onInPosition={handleInPosition}
+        />
+      )}
 
       {(phase === "live" || phase === "countdown") && (
         <MatchHud
@@ -524,17 +606,26 @@ export default function PlayClient() {
             </p>
           ) : phase === "position" ? (
             <>
-              <p className="display text-4xl">{inPosition ? "Hold it" : "Get into position"}</p>
+              <p className="display text-4xl">
+                {inPosition ? "Hold it" : framing && framing.issue !== "ok" ? "Fix the camera" : "Get into position"}
+              </p>
               <p className="mt-3 max-w-sm text-muted">
                 {inPosition
                   ? channelRef.current
                     ? "Waiting for your opponent to set up."
                     : "Starting."
-                  : "Camera side-on, whole body in frame, arms locked out at the top. The match starts on its own."}
+                  : framing && framing.issue !== "ok"
+                    ? framing.hint
+                    : "Arms locked out at the top, body in one line. The match starts on its own."}
               </p>
               <div className="mt-6 h-1.5 w-48 overflow-hidden rounded-full bg-line">
                 <div className={`h-full bg-you transition-all duration-700 ${inPosition ? "w-full" : "w-0"}`} />
               </div>
+              {variationId !== "standard" && (
+                <p className="display mt-4 text-xs tracking-[0.15em] text-gold">
+                  {variation(variationId).name.toUpperCase()} PUSH-UPS
+                </p>
+              )}
             </>
           ) : phase === "room" ? (
             <>
@@ -560,7 +651,19 @@ export default function PlayClient() {
               )}
             </>
           )}
-          <Link href="/" className="display mt-10 text-sm text-muted transition hover:text-text">
+          {coachOpts && (
+            <button
+              onClick={() => setCoach({ ...coachOpts, speak: !coachOpts.speak, tones: !coachOpts.speak })}
+              className="display mt-8 rounded-lg border border-line px-4 py-2 text-sm transition hover:border-white/30"
+            >
+              {coachOpts.speak ? "🔊 Coach on" : "🔇 Coach off"}
+            </button>
+          )}
+          <p className="mx-auto mt-3 max-w-xs text-xs leading-relaxed text-muted">
+            Your face points at the floor during a push-up. The count and every no-rep are spoken
+            out loud so you never have to look up.
+          </p>
+          <Link href="/" className="display mt-8 block text-sm text-muted transition hover:text-text">
             Leave
           </Link>
         </Overlay>
@@ -574,6 +677,9 @@ export default function PlayClient() {
           durationS={durationS}
           noReps={noRepCountRef.current}
           hiddenMs={hiddenMsRef.current}
+          repDetail={repDetailRef.current}
+          noRepDetail={noRepDetailRef.current}
+          config={config}
           result={result}
           onShare={doShare}
           shareState={shareState}
@@ -653,6 +759,9 @@ function Done({
   durationS,
   noReps,
   hiddenMs,
+  repDetail,
+  noRepDetail,
+  config,
   result,
   onShare,
   shareState,
@@ -663,6 +772,9 @@ function Done({
   durationS: number;
   noReps: number;
   hiddenMs: number;
+  repDetail: RepEvent[];
+  noRepDetail: NoRepEvent[];
+  config: CounterConfig;
   result: { delta: number; ratingAfter: number; flagged: string | null } | null;
   onShare: () => void;
   shareState: "idle" | "working" | "done";
@@ -721,6 +833,10 @@ function Done({
         {!ladderEnabled && (
           <p className="mt-4 text-sm text-muted">Ladder offline — this result was kept on this device only.</p>
         )}
+
+        <div className="mt-6 text-left">
+          <FormReport reps={repDetail} noReps={noRepDetail} config={config} />
+        </div>
 
         <button
           onClick={onShare}

@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SKELETON, detect, loadLandmarker } from "@/lib/pose/landmarker";
 import { L } from "@/lib/pose/geometry";
-import { NoRepEvent, RepCounter, RepEvent, Strictness, STRICTNESS } from "@/lib/pose/repCounter";
+import type { CounterConfig, Frame, NoRepEvent, RepEvent } from "@/lib/pose/repCounter";
+import { RepCounter } from "@/lib/pose/repCounter";
 import { SimulatedAthlete } from "@/lib/pose/simulator";
+import { FramingStabiliser, analyseFraming, type Framing } from "@/lib/coach/framing";
 
 export type StageStatus = "idle" | "camera" | "model" | "ready" | "error";
 
 interface Props {
-  strictness: Strictness;
+  config: CounterConfig;
   /** When true, reps count. Flipping it on resets the counter. */
   armed: boolean;
   onRep?: (r: RepEvent) => void;
@@ -17,6 +19,10 @@ interface Props {
   onStatus?: (s: StageStatus, message?: string) => void;
   /** Fires when the athlete has held a plank long enough to start. */
   onInPosition?: (ready: boolean) => void;
+  /** Camera setup verdict, while not armed. */
+  onFraming?: (f: Framing) => void;
+  /** A live form fault worth saying out loud mid-set. */
+  onFault?: (fault: "hips" | "flare" | null) => void;
   /**
    * Demo mode: drive the referee from a simulated athlete instead of a camera.
    * Same counter, same gates, same overlay — only the landmark source changes,
@@ -25,7 +31,17 @@ interface Props {
   simulate?: boolean;
 }
 
-export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatus, onInPosition, simulate }: Props) {
+export default function CameraStage({
+  config,
+  armed,
+  onRep,
+  onNoRep,
+  onStatus,
+  onInPosition,
+  onFraming,
+  onFault,
+  simulate,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const counterRef = useRef<RepCounter | null>(null);
@@ -33,6 +49,7 @@ export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatu
   const lastTsRef = useRef(-1);
   const armedRef = useRef(armed);
   const positionRef = useRef(false);
+  const faultRef = useRef<"hips" | "flare" | null>(null);
 
   const [status, setStatus] = useState<StageStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +63,13 @@ export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatu
   );
 
   // Callbacks live in refs so the render loop is never rebuilt mid-match.
-  const cbRef = useRef({ onRep, onNoRep, onInPosition });
-  cbRef.current = { onRep, onNoRep, onInPosition };
+  const cbRef = useRef({ onRep, onNoRep, onInPosition, onFraming, onFault });
+  cbRef.current = { onRep, onNoRep, onInPosition, onFraming, onFault };
+
+  // The config is read every frame, so keep it current without restarting the
+  // camera — changing variation mid-setup should not drop the video stream.
+  const cfgRef = useRef(config);
+  cfgRef.current = config;
 
   useEffect(() => {
     if (armed && counterRef.current) {
@@ -62,41 +84,68 @@ export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatu
     let stream: MediaStream | null = null;
 
     const counter = new RepCounter(
-      strictness,
+      cfgRef.current,
       (r) => armedRef.current && cbRef.current.onRep?.(r),
       (n) => armedRef.current && cbRef.current.onNoRep?.(n),
     );
     counterRef.current = counter;
+    const framing = new FramingStabiliser(700);
+
+    /** Shared by the camera and demo paths — everything after the landmarks. */
+    const consume = (world: Parameters<RepCounter["update"]>[0], image: Parameters<RepCounter["update"]>[1], ts: number) => {
+      const cfg = cfgRef.current;
+      const frame = counter.update(world, image, ts);
+
+      if (!armedRef.current) {
+        const verdict = framing.push(analyseFraming(image, cfg.bodyLineJoint), ts);
+        cbRef.current.onFraming?.(verdict);
+
+        const ready = verdict.issue === "ok" && counter.readyFor(1200, ts);
+        if (ready !== positionRef.current) {
+          positionRef.current = ready;
+          cbRef.current.onInPosition?.(ready);
+        }
+      } else {
+        // Only shout about a fault while it is actually happening.
+        const fault =
+          frame.tracked && frame.phase !== "top" && frame.bodyLine < cfg.bodyLineMin
+            ? "hips"
+            : frame.tracked && frame.phase !== "top" && frame.flare > cfg.maxFlare
+              ? "flare"
+              : null;
+        if (fault !== faultRef.current) {
+          faultRef.current = fault;
+          cbRef.current.onFault?.(fault);
+        }
+      }
+
+      const c = canvasRef.current;
+      const v = videoRef.current;
+      const dims = simulate
+        ? { videoWidth: 960, videoHeight: 540 }
+        : { videoWidth: v?.videoWidth || 960, videoHeight: v?.videoHeight || 540 };
+      if (c) draw(c, dims, image, frame, cfg, armedRef.current);
+
+      if (simulate) {
+        // Demo mode exposes the referee's view for threshold tuning.
+        (window as unknown as { __pug?: unknown }).__pug = {
+          ...frame,
+          reps: counter.count,
+          noReps: counter.noReps.length,
+        };
+      }
+    };
 
     if (simulate) {
       const athlete = new SimulatedAthlete();
       push("ready");
       const loop = () => {
         rafRef.current = requestAnimationFrame(loop);
-        const c = canvasRef.current;
-        if (!c) return;
         const ts = performance.now();
         if (ts <= lastTsRef.current) return;
         lastTsRef.current = ts;
-
         const { world, image } = athlete.sample(ts);
-        const frame = counter.update(world, image, ts);
-
-        if (!armedRef.current) {
-          const ready = counter.readyFor(1200, ts);
-          if (ready !== positionRef.current) {
-            positionRef.current = ready;
-            cbRef.current.onInPosition?.(ready);
-          }
-        }
-        draw(c, { videoWidth: 960, videoHeight: 540 }, image, frame, STRICTNESS[strictness], armedRef.current);
-        // Demo mode exposes the referee's view for threshold tuning.
-        (window as unknown as { __pug?: unknown }).__pug = {
-          ...frame,
-          reps: counter.count,
-          noReps: counter.noReps.length,
-          ready: counter.readyFor(1200, ts),
-        };
+        consume(world, image, ts);
       };
       rafRef.current = requestAnimationFrame(loop);
       return () => {
@@ -127,35 +176,19 @@ export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatu
         const loop = () => {
           rafRef.current = requestAnimationFrame(loop);
           const v = videoRef.current;
-          const c = canvasRef.current;
-          if (!v || !c || v.readyState < 2) return;
+          if (!v || v.readyState < 2) return;
 
           // MediaPipe's VIDEO mode rejects a timestamp it has already seen.
           const ts = performance.now();
           if (ts <= lastTsRef.current) return;
           lastTsRef.current = ts;
 
-          let world = null;
-          let image = null;
           try {
             const r = detect(lm, v, ts);
-            world = r.world;
-            image = r.image;
+            consume(r.world, r.image, ts);
           } catch {
-            return; // a dropped frame is not worth tearing the loop down
+            // A dropped frame is not worth tearing the loop down.
           }
-
-          const frame = counter.update(world, image, ts);
-
-          if (!armedRef.current) {
-            const ready = counter.readyFor(1200, ts);
-            if (ready !== positionRef.current) {
-              positionRef.current = ready;
-              cbRef.current.onInPosition?.(ready);
-            }
-          }
-
-          draw(c, v, image, frame, STRICTNESS[strictness], armedRef.current);
         };
         rafRef.current = requestAnimationFrame(loop);
       } catch (err) {
@@ -175,9 +208,13 @@ export default function CameraStage({ strictness, armed, onRep, onNoRep, onStatu
     return () => {
       cancelled = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      // Release the camera on the way out. Leaving the indicator light on
+      // after a set is the single most-reported complaint about apps like this.
       stream?.getTracks().forEach((t) => t.stop());
+      const v = videoRef.current;
+      if (v) v.srcObject = null;
     };
-  }, [strictness, push, simulate]);
+  }, [push, simulate]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
@@ -218,8 +255,8 @@ function draw(
   canvas: HTMLCanvasElement,
   video: { videoWidth: number; videoHeight: number },
   image: { x: number; y: number; visibility?: number }[] | null,
-  frame: { elbow: number; elbowSmooth: number; bodyLine: number; depthPct: number; tracked: boolean; phase: string },
-  cfg: { bottomAngle: number; bodyLineMin: number },
+  frame: Frame,
+  cfg: CounterConfig,
   armed: boolean,
 ) {
   const vw = video.videoWidth || 960;
@@ -234,8 +271,9 @@ function draw(
   ctx.clearRect(0, 0, vw, vh);
 
   const bodyOk = frame.bodyLine >= cfg.bodyLineMin;
+  const flareOk = frame.flare <= cfg.maxFlare;
   const deep = frame.elbow <= cfg.bottomAngle;
-  const stroke = !frame.tracked ? "#4a5568" : !bodyOk ? "#ff4767" : deep ? "#24e07f" : "#8aa0c0";
+  const stroke = !frame.tracked ? "#4a5568" : !bodyOk ? "#ff4767" : !flareOk ? "#f0b429" : deep ? "#24e07f" : "#8aa0c0";
 
   if (image) {
     ctx.lineWidth = Math.max(3, vw / 220);
@@ -295,13 +333,14 @@ function draw(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  if (!bodyOk && frame.tracked) {
+  const shout = !frame.tracked ? null : !bodyOk ? "STRAIGHTEN UP" : !flareOk ? "ELBOWS IN" : null;
+  if (shout) {
     ctx.save();
     ctx.scale(-1, 1); // undo the mirror so text reads correctly
-    ctx.fillStyle = "#ff4767";
+    ctx.fillStyle = bodyOk ? "#f0b429" : "#ff4767";
     ctx.font = `700 ${Math.round(vw / 26)}px "Arial Narrow", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("STRAIGHTEN UP", -vw / 2, vh - vh / 12);
+    ctx.fillText(shout, -vw / 2, vh - vh / 12);
     ctx.restore();
   }
 }

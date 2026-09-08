@@ -1,6 +1,9 @@
 /** Synthetic-skeleton tests for the rep referee. Run: npm run test */
-import { RepCounter } from "../src/lib/pose/repCounter";
+import { RepCounter, type CounterConfig } from "../src/lib/pose/repCounter";
+import { configFor, VARIATIONS } from "../src/lib/pose/variations";
 import { computeElo, implausible } from "../src/lib/elo";
+import { analyseFraming } from "../src/lib/coach/framing";
+import { EMPTY_STATE, needsTest, planFor, recordSession, today, weekOf, type TrainingState } from "../src/lib/training";
 import type { Pt } from "../src/lib/pose/geometry";
 import { SimulatedAthlete, syntheticSkeleton as skeleton } from "../src/lib/pose/simulator";
 
@@ -11,21 +14,36 @@ const IMAGE: Pt[] = (() => {
   return p;
 })();
 
+/** A body that is straight to the knee but has the shins folded up, as in a real knee push-up. */
+function kneeSkeleton(elbowDeg: number): Pt[] {
+  const pts = skeleton(elbowDeg, 178, 45);
+  pts[25] = pts[26] = { x: 0.9, y: 0, z: 0, visibility: 1 };
+  pts[27] = pts[28] = { x: 0.9, y: -0.4, z: 0, visibility: 1 };
+  return pts;
+}
+
 /** Drives one descend/ascend cycle, sampling at 30fps. */
-function rep(c: RepCounter, t: number, opts: { bottom: number; durMs: number; body?: number }) {
+function rep(
+  c: RepCounter,
+  t: number,
+  opts: { bottom: number; durMs: number; body?: number; flare?: number; pose?: (e: number) => Pt[]; ecc?: number },
+) {
   const body = opts.body ?? 178;
+  const flare = opts.flare ?? 45;
+  const pose = opts.pose ?? ((e: number) => skeleton(e, body, flare));
   const steps = Math.max(4, Math.round(opts.durMs / 33));
-  const half = Math.floor(steps / 2);
+  // `ecc` splits the cycle: 0.5 is symmetric, 0.75 spends three quarters lowering.
+  const half = Math.max(1, Math.round(steps * (opts.ecc ?? 0.5)));
   for (let i = 0; i <= steps; i++) {
-    const k = i <= half ? i / half : (steps - i) / (steps - half);
+    const k = i <= half ? i / half : Math.max(0, (steps - i) / Math.max(1, steps - half));
     const angle = 175 - (175 - opts.bottom) * k;
     t += opts.durMs / steps;
-    c.update(skeleton(angle, body), IMAGE, t);
+    c.update(pose(angle), IMAGE, t);
   }
   // Settle at full lockout so the state machine sees the top.
   for (let i = 0; i < 6; i++) {
     t += 33;
-    c.update(skeleton(178, body), IMAGE, t);
+    c.update(pose(178), IMAGE, t);
   }
   return t;
 }
@@ -82,6 +100,83 @@ console.log("\nrep counter (ranked strictness)");
   check("20 reps in a row, none dropped", c.count, 20);
 }
 
+console.log("\nelbow flare");
+{
+  const ranked = new RepCounter("ranked");
+  rep(ranked, 1000, { bottom: 80, durMs: 1200, flare: 92 });
+  check("flared rep still counts under ranked rules", [ranked.count, ranked.noReps.length], [1, 0]);
+  check("but the flare is recorded on the rep", (ranked.reps[0]?.flareDeg ?? 0) >= 85, true);
+
+  // Well past strict's 85° gate, so flare is the only thing left to decide it.
+  const strict = new RepCounter("strict");
+  rep(strict, 1000, { bottom: 72, durMs: 1200, flare: 92 });
+  check("strict rules void it", [strict.count, strict.noReps[0]?.reason], [0, "flare"]);
+
+  const tucked = new RepCounter("strict");
+  rep(tucked, 1000, { bottom: 72, durMs: 1200, flare: 42 });
+  check("tucked elbows pass strict", tucked.count, 1);
+}
+
+console.log("\ntempo split");
+{
+  const c = new RepCounter("ranked");
+  rep(c, 1000, { bottom: 78, durMs: 2400, ecc: 0.75 });
+  const r = c.reps[0];
+  check("a slow negative is measured as such", !!r && r.eccentricMs > r.concentricMs * 1.6, true);
+  check("the two halves add up to the rep", !!r && Math.abs(r.eccentricMs + r.concentricMs - r.durationMs) <= 40, true);
+}
+
+console.log("\nvariations");
+{
+  const onAnkle = new RepCounter(configFor("ranked", "standard"));
+  rep(onAnkle, 1000, { bottom: 80, durMs: 1200, pose: kneeSkeleton });
+  check("knee push-up fails the standard body line", [onAnkle.count, onAnkle.noReps[0]?.reason], [0, "hips"]);
+
+  const onKnee = new RepCounter(configFor("ranked", "knee"));
+  rep(onKnee, 1000, { bottom: 80, durMs: 1200, pose: kneeSkeleton });
+  check("the knee variation counts it", onKnee.count, 1);
+
+  check("exactly one variation is ranked", VARIATIONS.filter((v) => v.ranked).length, 1);
+  const diamond: CounterConfig = configFor("ranked", "diamond");
+  check("diamond tightens the flare allowance", diamond.maxFlare < configFor("ranked", "standard").maxFlare, true);
+}
+
+console.log("\nframing coach");
+{
+  /** Builds image-space landmarks from explicit joint positions. */
+  const img = (j: Record<number, [number, number]>): Pt[] => {
+    const p: Pt[] = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0 }));
+    for (const [i, [x, y]] of Object.entries(j)) {
+      p[Number(i)] = { x, y, visibility: 1 };
+      // Mirror onto the other side of the pair so midpoints resolve.
+      const partner = Number(i) % 2 === 1 ? Number(i) + 1 : Number(i) - 1;
+      p[partner] = { x, y, visibility: 1 };
+    }
+    return p;
+  };
+
+  const good = img({ 15: [0.1, 0.8], 11: [0.22, 0.5], 23: [0.55, 0.52], 25: [0.72, 0.6], 27: [0.9, 0.75] });
+  check("a good side-on setup passes", analyseFraming(good).issue, "ok");
+
+  check("nothing in frame", analyseFraming(null).issue, "no-one");
+
+  const standing = img({ 15: [0.5, 0.7], 11: [0.5, 0.25], 23: [0.5, 0.6], 25: [0.5, 0.8], 27: [0.5, 0.95] });
+  check("camera in front of them", analyseFraming(standing).issue, "face-on");
+
+  const legsOut = img({ 15: [0.1, 0.8], 11: [0.25, 0.5], 23: [0.8, 0.52] });
+  check("legs out of shot", analyseFraming(legsOut).issue, "tail-cropped");
+
+  const tiny = img({ 15: [0.44, 0.55], 11: [0.48, 0.5], 23: [0.6, 0.51], 25: [0.64, 0.53], 27: [0.68, 0.56] });
+  check("too far away", analyseFraming(tiny).issue, "too-far");
+
+  const huge = img({ 15: [0.01, 0.9], 11: [0.2, 0.4], 23: [0.6, 0.45], 25: [0.8, 0.6], 27: [0.99, 0.8] });
+  check("too close to fit", analyseFraming(huge).issue, "too-close");
+
+  // A knee push-up has no ankle in shot by design; the knee has to satisfy it.
+  const kneeOnly = img({ 15: [0.1, 0.8], 11: [0.24, 0.5], 23: [0.6, 0.52], 25: [0.85, 0.62] });
+  check("knee variation accepts no ankle", analyseFraming(kneeOnly, "knee").issue, "ok");
+}
+
 console.log("\nready detection");
 {
   const c = new RepCounter("ranked");
@@ -131,6 +226,57 @@ console.log("\nfull pipeline (simulated athlete → referee)");
   // The referee's own output must survive the floor the ladder applies.
   const timeline = c.reps.map((r) => Math.round(r.tMs - 1000));
   check("its own output passes the plausibility floor", implausible(timeline, 60, c.count), null);
+}
+
+console.log("\ntraining plan");
+{
+  const iso = (daysAgo: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return today(d);
+  };
+
+  check("a new athlete is sent to test first", planFor(EMPTY_STATE).kind, "test");
+  check("no max means a test is due", needsTest(EMPTY_STATE), true);
+
+  const tested: TrainingState = { ...EMPTY_STATE, maxSet: 20, maxSetOn: iso(0) };
+  check("a fresh max does not need retesting", needsTest(tested), false);
+  check("three weeks later it does", needsTest({ ...tested, maxSetOn: iso(21) }), true);
+
+  const first = planFor(tested);
+  check("first prescription is volume", first.kind, "volume");
+  check("volume is five sets", first.sets.length, 5);
+  check("nothing is prescribed at or above the max", first.sets.every((s) => s.reps < tested.maxSet), true);
+  check("but total work exceeds a single max set", first.totalReps > tested.maxSet, true);
+
+  // Rotation: the stimulus changes with each completed session.
+  const afterOne = recordSession(tested, { kind: "volume", reps: first.totalReps });
+  check("second is a ladder", planFor(afterOne).kind, "ladder");
+  const afterTwo = recordSession(afterOne, { kind: "ladder", reps: 40 });
+  check("third is density", planFor(afterTwo).kind, "density");
+  const afterThree = recordSession(afterTwo, { kind: "density", reps: 70 });
+  check("then it rotates back", planFor(afterThree).kind, "volume");
+
+  // Overload: the same athlete, six weeks on, gets more work.
+  const later: TrainingState = { ...tested, maxSetOn: iso(14) };
+  check("weeks are counted from the test", weekOf(later), 2);
+  check("later weeks prescribe more", planFor(later).totalReps > first.totalReps, true);
+
+  console.log("\nstreaks");
+  const d1 = recordSession(EMPTY_STATE, { kind: "volume", reps: 30, date: iso(2) });
+  const d2 = recordSession(d1, { kind: "volume", reps: 30, date: iso(1) });
+  const d3 = recordSession(d2, { kind: "volume", reps: 30, date: iso(0) });
+  check("three consecutive days is a streak of 3", d3.streak, 3);
+
+  const twice = recordSession(d3, { kind: "groove", reps: 8, date: iso(0) });
+  check("two sessions in one day is still one day", twice.streak, 3);
+
+  const broken = recordSession(EMPTY_STATE, { kind: "volume", reps: 30, date: iso(5) });
+  check("a stale session is not a live streak", broken.streak, 0);
+  check("best streak is remembered", recordSession(d3, { kind: "volume", reps: 1, date: iso(9) }).bestStreak, 3);
+
+  const maxed = recordSession(tested, { kind: "test", reps: 26 });
+  check("a test rebaselines the max", [maxed.maxSet, maxed.maxSetOn === today()], [26, true]);
 }
 
 console.log("\nplausibility floor");

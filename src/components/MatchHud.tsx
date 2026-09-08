@@ -15,6 +15,7 @@ const REASON_TEXT: Record<NoRepReason, string> = {
   hips: "NO REP · HIPS DROPPED",
   fast: "NO REP · TOO FAST",
   lost: "NO REP · LOST YOU",
+  flare: "NO REP · ELBOWS OUT",
 };
 
 export default function MatchHud({
