@@ -146,17 +146,30 @@ export async function submitResult(a: SubmitArgs): Promise<SubmitResult> {
   if (error) return { applied: false, flagged: null, delta: 0, ratingAfter: a.me.rating };
 
   const row = (Array.isArray(data) ? data[0] : data) as
-    | { a_delta: number; a_rating_after: number | null; flagged: string | null }
+    | {
+        a_id: string;
+        a_delta: number;
+        b_delta: number;
+        a_rating_after: number | null;
+        b_rating_after: number | null;
+        flagged: string | null;
+      }
     | null;
   if (!row) return { applied: false, flagged: null, delta: 0, ratingAfter: a.me.rating };
 
-  const ratingAfter = row.a_rating_after ?? a.me.rating;
+  // Both players submit the same match with the sides swapped, and the database
+  // keeps whichever arrived first. If that was the other player, this row is
+  // written from their point of view — read our numbers off the B columns, or
+  // we would show the loser the winner's rating change.
+  const iAmA = row.a_id === a.me.id;
+  const myDelta = (iAmA ? row.a_delta : row.b_delta) ?? 0;
+  const ratingAfter = (iAmA ? row.a_rating_after : row.b_rating_after) ?? a.me.rating;
   cachePlayer({ ...a.me, rating: ratingAfter, peak_rating: Math.max(a.me.peak_rating, ratingAfter) });
 
   return {
     applied: !row.flagged,
     flagged: row.flagged,
-    delta: row.a_delta ?? 0,
+    delta: myDelta,
     ratingAfter,
   };
 }

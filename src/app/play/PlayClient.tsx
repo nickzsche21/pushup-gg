@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CameraStage from "@/components/CameraStage";
 import MatchHud, { type Side } from "@/components/MatchHud";
 import { RankBadge } from "@/components/RankBadge";
@@ -72,6 +72,12 @@ export default function PlayClient() {
   const noRepCountRef = useRef(0);
   const oppCurveRef = useRef<Array<[number, number]>>([]);
   const oppRef = useRef<Opp | null>(null);
+  // The opponent's running totals live in refs, not in `opp`. `oppRef` is
+  // reassigned from state on every render, so anything written into it from a
+  // broadcast handler is gone by the next paint — which silently submitted
+  // every 1v1 as "they scored zero".
+  const oppRepsRef = useRef(0);
+  const oppNoRepsRef = useRef(0);
   const lastRepAtRef = useRef(0);
   const peerReadyRef = useRef(false);
   const iAmReadyRef = useRef(false);
@@ -79,6 +85,7 @@ export default function PlayClient() {
   const goneRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const hiddenMsRef = useRef(0);
+  const finishedRef = useRef(false);
 
   oppRef.current = opp;
 
@@ -90,26 +97,31 @@ export default function PlayClient() {
     void syncPlayer(id, h).then(setMe);
   }, []);
 
-  const peer: PeerInfo | null = useMemo(
-    () => (me ? { id: me.id, handle: me.handle, rating: me.rating, matches: me.matches } : null),
-    [me],
-  );
+  // Held in a ref, not a dependency. Submitting a result updates `me`, and if
+  // the matchmaking effect depended on that object it would tear down the
+  // finished match and drop the player back into the queue from the results
+  // screen. It only ever needs the identity as it stood when the match began.
+  const peerRef = useRef<PeerInfo | null>(null);
+  peerRef.current = me ? { id: me.id, handle: me.handle, rating: me.rating, matches: me.matches } : null;
+  const identified = Boolean(me);
 
   // ---- wiring a connected 1v1 channel ------------------------------------
   const wireChannel = useCallback((ch: RealtimeChannel, meId: string) => {
     channelRef.current = ch;
 
+    const record = (p: { reps: number; noReps: number }) => {
+      oppRepsRef.current = p.reps;
+      oppNoRepsRef.current = p.noReps;
+      setOppReps(p.reps);
+    };
+
     ch.on("broadcast", { event: "state" }, ({ payload }) => {
       const p = payload as { reps: number; noReps: number };
-      setOppReps(p.reps);
+      record(p);
       oppCurveRef.current.push([performance.now() - startPerfRef.current, p.reps]);
     });
 
-    ch.on("broadcast", { event: "final" }, ({ payload }) => {
-      const p = payload as { reps: number; noReps: number };
-      setOppReps(p.reps);
-      if (oppRef.current) oppRef.current = { ...oppRef.current, reps: p.reps, noReps: p.noReps };
-    });
+    ch.on("broadcast", { event: "final" }, ({ payload }) => record(payload as { reps: number; noReps: number }));
 
     ch.on("broadcast", { event: "ready" }, ({ payload }) => {
       peerReadyRef.current = (payload as { ready: boolean }).ready;
@@ -141,6 +153,7 @@ export default function PlayClient() {
 
   // ---- matchmaking -------------------------------------------------------
   useEffect(() => {
+    const peer = peerRef.current;
     if (!peer) return;
     let cancelled = false;
 
@@ -232,7 +245,7 @@ export default function PlayClient() {
       cancelled = true;
       ac.abort();
     };
-  }, [peer, mode, durationS, code, wireChannel]);
+  }, [identified, mode, durationS, code, wireChannel]);
 
   useEffect(
     () => () => {
@@ -270,7 +283,10 @@ export default function PlayClient() {
           timelineRef.current = [];
           noRepCountRef.current = 0;
           hiddenMsRef.current = 0;
+          finishedRef.current = false;
           oppCurveRef.current = [];
+          oppRepsRef.current = 0;
+          oppNoRepsRef.current = 0;
           lastRepAtRef.current = 0;
           startPerfRef.current = performance.now();
           setMyReps(0);
@@ -328,6 +344,10 @@ export default function PlayClient() {
 
   // ---- the match ---------------------------------------------------------
   const finish = useCallback(async () => {
+    // The clock ticks every 100ms and React batches the phase change, so the
+    // end condition can be met more than once before the interval is torn down.
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     setPhase("done");
     const ch = channelRef.current;
     if (ch) sendFinal(ch, { reps: timelineRef.current.length, noReps: noRepCountRef.current });
@@ -342,7 +362,7 @@ export default function PlayClient() {
     const ghost = ghostRef.current;
     const oppFinal = ghost
       ? ghost.timeline.filter((t) => t <= (durationS > 0 ? durationS * 1000 : Infinity)).length
-      : (o?.reps ?? 0);
+      : oppRepsRef.current;
 
     const r = await submitResult({
       matchId: matchIdRef.current,
@@ -358,7 +378,7 @@ export default function PlayClient() {
             rating: o.rating,
             matches: o.matches,
             reps: oppFinal,
-            noReps: o.noReps,
+            noReps: ghost ? 0 : oppNoRepsRef.current,
             handle: o.handle,
           }
         : undefined,
@@ -710,13 +730,12 @@ function Done({
           {shareState === "working" ? "Drawing…" : shareState === "done" ? "Saved ✓" : "Save the result card"}
         </button>
         <div className="mt-3 flex gap-3">
-          <Link
-            href={`/play?mode=${mode}${durationS ? `&d=${durationS}` : "&d=0"}`}
+          <button
+            onClick={() => window.location.reload()}
             className="display flex-1 rounded-lg border border-line py-3 transition hover:border-white/30"
-            onClick={() => setTimeout(() => window.location.reload(), 0)}
           >
             Again
-          </Link>
+          </button>
           <Link href="/leaderboard" className="display flex-1 rounded-lg border border-line py-3 transition hover:border-white/30">
             Ladder
           </Link>
