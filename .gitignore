@@ -1,0 +1,13 @@
+node_modules
+.next
+out
+.env
+.env.local
+.DS_Store
+*.tsbuildinfo
+.vercel
+next-env.d.ts
+
+# staged by scripts/prepare-assets.mjs
+public/mediapipe
+public/models

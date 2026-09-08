@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #06080e;
+  --color-ink-2: #0b0f1a;
+  --color-panel: #111726;
+  --color-line: #1e2637;
+  --color-text: #e9edf6;
+  --color-muted: #7b8698;
+  --color-you: #24e07f;
+  --color-them: #ff4767;
+  --color-gold: #f0b429;
+
+  --font-display: var(--font-condensed), "Arial Narrow", system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* A faint stadium wash so the pure-black background doesn't read as broken. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(36, 224, 127, 0.07), transparent 60%),
+    radial-gradient(55rem 38rem at 92% 4%, rgba(255, 71, 103, 0.07), transparent 62%);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+}
+
+.hud {
+  background: rgba(6, 8, 14, 0.72);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+@keyframes pug-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  45% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop { animation: pug-pop 320ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+
+@keyframes pug-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-7px); }
+  75% { transform: translateX(7px); }
+}
+.shake { animation: pug-shake 260ms ease-in-out; }
+
+@keyframes pug-rise {
+  from { transform: translateY(14px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.rise { animation: pug-rise 420ms cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pop, .shake, .rise { animation: none; }
+}

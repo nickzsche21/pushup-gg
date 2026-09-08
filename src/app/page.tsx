@@ -1,0 +1,186 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { RankMeter } from "@/components/RankBadge";
+import { cachedPlayer, syncPlayer, type Player } from "@/lib/api";
+import { handle as getHandle, playerId, setHandle } from "@/lib/identity";
+import { ladderEnabled } from "@/lib/supabase/client";
+
+const MODES = [
+  {
+    href: "/play?mode=ranked&d=60",
+    kicker: "Ranked",
+    title: "1v1 · 60 seconds",
+    body: "Queued against the closest rating online. No one waiting? You race a ghost — a real set someone already filmed.",
+    accent: "var(--color-you)",
+  },
+  {
+    href: "/play?mode=solo&d=0",
+    kicker: "Max set",
+    title: "To failure",
+    body: "No clock. Ends ten seconds after your last good rep. This is the number that goes on the records board.",
+    accent: "var(--color-gold)",
+  },
+  {
+    href: "/play?mode=room",
+    kicker: "Private room",
+    title: "Someone you know",
+    body: "Share a six-character code. Two phones, two cameras, one bar between you.",
+    accent: "var(--color-them)",
+  },
+];
+
+const GATES = [
+  ["Depth", "Elbows past 95°. A rep you stop short on is announced as NO REP, not quietly dropped."],
+  ["Lockout", "Arms back past 155° at the top. Half-way up is half a rep, which is none."],
+  ["Body line", "Shoulder–hip–ankle held above 152°. Sagging or piking voids the rep."],
+  ["Tempo", "Nothing under 380ms. Bouncing off the floor is not a push-up."],
+];
+
+export default function Home() {
+  const [player, setPlayer] = useState<Player | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    const id = playerId();
+    const h = getHandle();
+    setPlayer(cachedPlayer(id, h));
+    void syncPlayer(id, h).then(setPlayer);
+  }, []);
+
+  const save = async () => {
+    const clean = draft.trim().slice(0, 18);
+    setEditing(false);
+    if (!clean || !player) return;
+    setHandle(clean);
+    setPlayer(await syncPlayer(player.id, clean));
+  };
+
+  return (
+    <main className="mx-auto w-full max-w-5xl px-5 pb-24 pt-8 sm:pt-12">
+      <header className="flex items-center justify-between">
+        <span className="display text-xl tracking-tight">
+          PUSHUP<span className="text-you">.GG</span>
+        </span>
+        <Link href="/leaderboard" className="display text-sm text-muted transition hover:text-text">
+          Ladder →
+        </Link>
+      </header>
+
+      <section className="mt-14 sm:mt-20">
+        <h1 className="display text-5xl leading-[0.92] sm:text-7xl">
+          Ranked 1v1
+          <br />
+          <span className="text-you">push-ups.</span>
+        </h1>
+        <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
+          Your webcam is the referee. It watches your elbows, your hips and your tempo, and it
+          throws out the reps that don&apos;t count — while someone else&apos;s camera does the same to
+          them, live, on the same bar.
+        </p>
+      </section>
+
+      <section className="panel mt-10 p-5">
+        {player ? (
+          <div className="flex flex-wrap items-center justify-between gap-5">
+            <div className="min-w-[13rem] flex-1">
+              {editing ? (
+                <div className="flex gap-2">
+                  <input
+                    autoFocus
+                    value={draft}
+                    maxLength={18}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void save()}
+                    className="display w-full rounded-md border border-line bg-ink px-3 py-1.5 text-lg outline-none focus:border-you"
+                  />
+                  <button onClick={() => void save()} className="display rounded-md bg-you px-4 text-sm text-ink">
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setDraft(player.handle);
+                    setEditing(true);
+                  }}
+                  className="display text-left text-2xl transition hover:text-you"
+                  title="Change your handle"
+                >
+                  {player.handle}
+                  <span className="ml-2 align-middle text-xs text-muted">edit</span>
+                </button>
+              )}
+              <p className="tabular mt-1 text-sm text-muted">
+                {player.matches > 0
+                  ? `${player.wins}W · ${player.losses}L · ${player.total_reps} reps counted`
+                  : "Unranked — five matches to place"}
+              </p>
+            </div>
+            <div className="w-full sm:w-64">
+              <RankMeter rating={player.rating} />
+            </div>
+          </div>
+        ) : (
+          <div className="h-20 animate-pulse rounded-lg bg-line/40" />
+        )}
+      </section>
+
+      <section className="mt-6 grid gap-4 sm:grid-cols-3">
+        {MODES.map((m) => (
+          <Link
+            key={m.href}
+            href={m.href}
+            className="panel group relative overflow-hidden p-5 transition hover:border-white/25"
+          >
+            <span className="display text-xs tracking-[0.18em]" style={{ color: m.accent }}>
+              {m.kicker}
+            </span>
+            <h2 className="display mt-1 text-2xl">{m.title}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{m.body}</p>
+            <span
+              className="absolute inset-x-0 bottom-0 h-0.5 origin-left scale-x-0 transition-transform duration-300 group-hover:scale-x-100"
+              style={{ background: m.accent }}
+            />
+          </Link>
+        ))}
+      </section>
+
+      <section className="mt-16">
+        <h2 className="display text-3xl">What counts as a rep</h2>
+        <p className="mt-2 max-w-2xl text-muted">
+          Every ladder built on an honour system dies the same way. Four gates run on every
+          repetition, and failing any one of them tells you which:
+        </p>
+        <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2">
+          {GATES.map(([name, body]) => (
+            <div key={name} className="bg-ink-2 p-5">
+              <h3 className="display text-lg text-you">{name}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">{body}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
+          Set the camera side-on, three or four steps back, so one whole side of your body is in
+          frame. Pose estimation runs on your own machine — the video is never uploaded, never
+          recorded, and never seen by your opponent. All that crosses the network is a running count.
+        </p>
+      </section>
+
+      <footer className="mt-16 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-6 text-sm text-muted">
+        <span>
+          Pose by MediaPipe, in your browser.
+          {!ladderEnabled && " Ladder offline — solo play still works."}
+        </span>
+        <a
+          href="https://github.com/nickzsche21/pushup-gg"
+          className="underline decoration-line underline-offset-4 transition hover:text-text"
+        >
+          Source
+        </a>
+      </footer>
+    </main>
+  );
+}
