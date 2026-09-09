@@ -3,7 +3,11 @@ import { RepCounter, type CounterConfig } from "../src/lib/pose/repCounter";
 import { configFor, VARIATIONS } from "../src/lib/pose/variations";
 import { computeElo, implausible } from "../src/lib/elo";
 import { analyseFraming } from "../src/lib/coach/framing";
-import { EMPTY_STATE, needsTest, planFor, recordSession, today, weekOf, type TrainingState } from "../src/lib/training";
+import {
+  EMPTY_STATE, needsTest, planFor, recordSession, today, weekOf,
+  todayTotal, setsToday, dailySeries, toCsv, progressionHint, lifetimeReps,
+  type TrainingState,
+} from "../src/lib/training";
 import type { Pt } from "../src/lib/pose/geometry";
 import { SimulatedAthlete, syntheticSkeleton as skeleton } from "../src/lib/pose/simulator";
 
@@ -257,6 +261,13 @@ console.log("\ntraining plan");
   const afterThree = recordSession(afterTwo, { kind: "density", reps: 70 });
   check("then it rotates back", planFor(afterThree).kind, "volume");
 
+  // Quick sets are the daily habit and there can be dozens; they must not
+  // shuffle the prescription.
+  let spammed = tested;
+  for (let i = 0; i < 25; i++) spammed = recordSession(spammed, { kind: "groove", reps: 8 });
+  check("quick sets don't advance the rotation", planFor(spammed).kind, "volume");
+  check("but they do count as volume", planFor(spammed).kind === planFor(tested).kind, true);
+
   // Overload: the same athlete, six weeks on, gets more work.
   const later: TrainingState = { ...tested, maxSetOn: iso(14) };
   check("weeks are counted from the test", weekOf(later), 2);
@@ -277,6 +288,42 @@ console.log("\ntraining plan");
 
   const maxed = recordSession(tested, { kind: "test", reps: 26 });
   check("a test rebaselines the max", [maxed.maxSet, maxed.maxSetOn === today()], [26, true]);
+}
+
+console.log("\nthe day as the unit");
+{
+  const iso = (daysAgo: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return today(d);
+  };
+
+  // The pattern from the thread: many small sets across one day.
+  let s: TrainingState = EMPTY_STATE;
+  for (let i = 0; i < 16; i++) s = recordSession(s, { kind: "groove", reps: 25, date: iso(0) });
+
+  check("sixteen sets of 25 is 400 today", todayTotal(s), 400);
+  check("and counts as sixteen sets", setsToday(s), 16);
+  check("but only one day of streak", s.streak, 1);
+  check("max set is the set, not the day", s.maxSet, 25);
+
+  const withYesterday = recordSession(s, { kind: "groove", reps: 30, date: iso(1) });
+  check("yesterday is not in today's total", todayTotal(withYesterday), 400);
+  check("lifetime counts everything", lifetimeReps(withYesterday), 430);
+
+  const series = dailySeries(withYesterday, 7);
+  check("series has one point per day", series.length, 7);
+  check("gaps are filled with zeroes", series[0].reps, 0);
+  check("today is last", [series[6].date === iso(0), series[6].reps], [true, 400]);
+  check("best-of-day is the biggest set", series[6].best, 25);
+
+  const csv = toCsv(recordSession(EMPTY_STATE, { kind: "test", reps: 21, date: iso(0) }));
+  check("csv has a header and a row", csv.trim().split("\n").length, 2);
+  check("csv row is date,kind,reps", csv.trim().split("\n")[1], `${iso(0)},test,21`);
+
+  check("no hint below ten", progressionHint({ ...EMPTY_STATE, maxSet: 6 }, "knee"), null);
+  check("knees get moved on at ten", (progressionHint({ ...EMPTY_STATE, maxSet: 12 }, "knee") ?? "").includes("incline"), true);
+  check("standard gets pushed harder at 25", (progressionHint({ ...EMPTY_STATE, maxSet: 26 }, "standard") ?? "").includes("Diamond"), true);
 }
 
 console.log("\nplausibility floor");

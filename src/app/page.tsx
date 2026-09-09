@@ -9,11 +9,18 @@ import { ladderEnabled } from "@/lib/supabase/client";
 
 const MODES = [
   {
+    href: "/set",
+    kicker: "Log a set",
+    title: "Whenever, wherever",
+    body: "No target, no countdown, no screens between sets. Starts when you get into a plank, stops ten seconds after your last rep, adds to today's total.",
+    accent: "var(--color-you)",
+  },
+  {
     href: "/play?mode=ranked&d=60",
     kicker: "Ranked",
     title: "1v1 · 60 seconds",
     body: "Queued against the closest rating online. No one waiting? You race a ghost — a real set someone already filmed.",
-    accent: "var(--color-you)",
+    accent: "#9be36a",
   },
   {
     href: "/train",
@@ -96,7 +103,22 @@ export default function Home() {
         </p>
       </section>
 
-      <section className="panel mt-10 p-5">
+      <section className="mt-10 flex flex-wrap gap-3">
+        <Link
+          href="/set"
+          className="display flex-1 rounded-xl bg-you px-6 py-4 text-center text-xl text-ink transition hover:brightness-110"
+        >
+          Log a set
+        </Link>
+        <Link
+          href="/play?mode=ranked&d=60"
+          className="display flex-1 rounded-xl border border-line px-6 py-4 text-center text-xl transition hover:border-white/30"
+        >
+          Play ranked
+        </Link>
+      </section>
+
+      <section className="panel mt-4 p-5">
         {player ? (
           <div className="flex flex-wrap items-center justify-between gap-5">
             <div className="min-w-[13rem] flex-1">
@@ -179,6 +201,24 @@ export default function Home() {
       </section>
 
       <section className="mt-16">
+        <h2 className="display text-3xl">On being strict about it</h2>
+        <p className="mt-2 max-w-2xl leading-relaxed text-muted">
+          There is a good argument against everything on this page. It goes: fixating on form is a
+          self-imposed barrier, all that matters is area under the curve, do them daily and in
+          quantity and the quality follows. People who have actually done ten thousand push-ups say
+          this, and they are not wrong.
+        </p>
+        <p className="mt-3 max-w-2xl leading-relaxed text-muted">
+          So the strictness is a setting, not a sermon. <span className="text-text">Casual</span>{" "}
+          counts nearly anything that moves and exists for exactly that argument — if the habit is
+          the thing you&apos;re building, take it and ignore the rest.{" "}
+          <span className="text-text">Ranked</span> is stricter because a shared ladder is
+          meaningless when everyone marks their own homework. Both are real; they answer different
+          questions.
+        </p>
+      </section>
+
+      <section className="mt-16">
         <h2 className="display text-3xl">What counts as a rep</h2>
         <p className="mt-2 max-w-2xl text-muted">
           Every ladder built on an honour system dies the same way. Four gates run on every
@@ -194,8 +234,14 @@ export default function Home() {
         </div>
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
           Set the camera side-on, three or four steps back, so one whole side of your body is in
-          frame. Pose estimation runs on your own machine — the video is never uploaded, never
-          recorded, and never seen by your opponent. All that crosses the network is a running count.
+          frame — and if you get it wrong the app tells you which part is wrong, rather than just
+          failing to count. Pose estimation runs on your own machine: the video is never uploaded,
+          never recorded, and never seen by your opponent. All that crosses the network is a
+          running count.
+        </p>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+          Add it to your home screen and it opens full-screen with a shortcut straight into a set.
+          The floor next to a propped-up phone is where this is meant to be used.
         </p>
       </section>
 

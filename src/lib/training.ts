@@ -112,7 +112,10 @@ export function planFor(state: TrainingState): Session {
   const max = state.maxSet;
   const week = weekOf(state);
   const bump = 1 + Math.min(0.32, week * 0.04);
-  const done = state.history.filter((h) => h.kind !== "test").length;
+  // Only *prescribed* sessions advance the rotation. Quick sets logged through
+  // the day are the point of the app, but there can be dozens of them, and
+  // letting them shuffle tomorrow's prescription makes the plan look random.
+  const done = state.history.filter((h) => h.kind === "volume" || h.kind === "ladder" || h.kind === "density").length;
 
   switch (done % 3) {
     case 0: {
@@ -200,6 +203,81 @@ export function recordSession(
   next.bestStreak = Math.max(state.bestStreak, streak);
 
   return next;
+}
+
+/**
+ * Reps logged today, across every set.
+ *
+ * The person in that thread who did 10,000 push-ups did them as "a set of 30 in
+ * the morning, then 400 in 16 sets of 25, every five minutes". The unit that
+ * matters is the day, not the session, so this is the number the app leads with.
+ */
+export function todayTotal(state: TrainingState, date = today()): number {
+  return state.history.filter((h) => h.date === date).reduce((a, h) => a + h.reps, 0);
+}
+
+export function setsToday(state: TrainingState, date = today()): number {
+  return state.history.filter((h) => h.date === date).length;
+}
+
+export interface DayPoint {
+  date: string;
+  reps: number;
+  sets: number;
+  /** Best single set that day, for the strength line. */
+  best: number;
+}
+
+/** One point per calendar day, gaps included, oldest first. */
+export function dailySeries(state: TrainingState, days = 30): DayPoint[] {
+  const byDate = new Map<string, DayPoint>();
+  for (const h of state.history) {
+    const d = byDate.get(h.date) ?? { date: h.date, reps: 0, sets: 0, best: 0 };
+    d.reps += h.reps;
+    d.sets += 1;
+    d.best = Math.max(d.best, h.reps);
+    byDate.set(h.date, d);
+  }
+
+  const out: DayPoint[] = [];
+  const cursor = new Date();
+  cursor.setDate(cursor.getDate() - (days - 1));
+  for (let i = 0; i < days; i++) {
+    const key = today(cursor);
+    out.push(byDate.get(key) ?? { date: key, reps: 0, sets: 0, best: 0 });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+export function lifetimeReps(state: TrainingState): number {
+  return state.history.reduce((a, h) => a + h.reps, 0);
+}
+
+/**
+ * People in these threads keep spreadsheets — one commenter asked another for
+ * the exact columns. Handing the data back is cheaper than becoming the place
+ * it is trapped.
+ */
+export function toCsv(state: TrainingState): string {
+  const rows = [["date", "kind", "reps"], ...state.history.map((h) => [h.date, h.kind, String(h.reps)])];
+  return rows.map((r) => r.join(",")).join("\n") + "\n";
+}
+
+/**
+ * When to stop doing knee push-ups.
+ *
+ * Beginners get parked on an easier variation indefinitely because nothing ever
+ * tells them they are ready. The rule of thumb people give each other is that
+ * ten clean knee reps means you have at least one full one in you.
+ */
+export function progressionHint(state: TrainingState, variationId: string): string | null {
+  if (state.maxSet < 10) return null;
+  if (variationId === "knee") return "Ten clean knee reps means you have a full one in you. Try incline next — hands on a chair.";
+  if (variationId === "incline") return "Ten clean incline reps: lower the surface a step, or try one standard rep at the start of a set.";
+  if (variationId === "standard" && state.maxSet >= 25)
+    return "Twenty-five standard reps is plenty of base. Diamond or decline will build strength faster than more volume here.";
+  return null;
 }
 
 export function volumeThisWeek(state: TrainingState): number {

@@ -40,7 +40,7 @@ export default function MatchHud({
         <div className="hud mx-auto max-w-2xl rounded-2xl px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="display truncate text-base leading-tight">{me.handle}</p>
+              <p className="display truncate text-sm leading-tight sm:text-base">{me.handle}</p>
               <div className="mt-1">
                 <RankBadge rating={me.rating} size="sm" />
               </div>
@@ -50,11 +50,11 @@ export default function MatchHud({
               <p className="display text-[10px] tracking-[0.2em] text-muted">
                 {subtitle ?? (opp?.isGhost ? "GHOST MATCH" : "RANKED MATCH")}
               </p>
-              <p className="display tabular text-3xl leading-none">{clock}</p>
+              <p className="display tabular text-2xl leading-none sm:text-3xl">{clock}</p>
             </div>
 
             <div className="min-w-0 flex-1 text-right">
-              <p className="display truncate text-base leading-tight">
+              <p className="display truncate text-sm leading-tight sm:text-base">
                 {opp ? opp.handle : "—"}
                 {opp?.isGhost && <span className="ml-1 align-middle text-[10px] text-muted">GHOST</span>}
               </p>
@@ -88,7 +88,7 @@ export default function MatchHud({
         )}
         <p
           key={me.reps}
-          className="display pop text-[7rem] leading-[0.8] text-white"
+          className="display pop text-[5.5rem] leading-[0.8] text-white sm:text-[7rem]"
           style={{ textShadow: "0 6px 40px rgba(0,0,0,0.85)" }}
         >
           {me.reps}

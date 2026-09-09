@@ -16,14 +16,26 @@ const description =
 export const metadata: Metadata = {
   title,
   description,
+  applicationName: "PUSHUP.GG",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/icon.png", type: "image/png" }],
+    apple: [{ url: "/icons/apple-icon.png", sizes: "180x180" }],
+  },
+  appleWebApp: { capable: true, title: "PUSHUP.GG", statusBarStyle: "black-translucent" },
   openGraph: { title, description, type: "website" },
   twitter: { card: "summary_large_image", title, description },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   themeColor: "#06080e",
   width: "device-width",
   initialScale: 1,
+  // The camera views are full-bleed and must not rubber-band or zoom while
+  // someone is face-down in front of the phone.
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 

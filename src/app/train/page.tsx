@@ -2,12 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ProgressChart from "@/components/ProgressChart";
 import { VARIATIONS, variation } from "@/lib/pose/variations";
 import {
   EMPTY_STATE,
   loadTraining,
   needsTest,
   planFor,
+  progressionHint,
+  setsToday,
+  toCsv,
+  todayTotal,
   volumeThisWeek,
   weekOf,
   type Session,
@@ -28,6 +33,7 @@ export default function TrainPage() {
 
   const s = state ?? EMPTY_STATE;
   const testing = needsTest(s);
+  const hint = progressionHint(s, vary);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 pb-24 pt-8">
@@ -45,6 +51,31 @@ export default function TrainPage() {
         Forty push-ups a day stops working almost immediately, which is the most-read complaint
         about push-ups anywhere. This prescribes work against your tested max, moves it every week,
         and rotates what it asks for.
+      </p>
+
+      {/* The day, not the session. Someone who did 10,000 push-ups did it as
+          sixteen sets of twenty-five spread across an afternoon. */}
+      <section className="panel mt-6 flex flex-wrap items-center gap-x-6 gap-y-4 p-5">
+        <div className="min-w-[9rem] flex-1">
+          <p className="display text-xs tracking-[0.2em] text-muted">TODAY</p>
+          <p className="display tabular text-5xl leading-none">{todayTotal(s)}</p>
+          <p className="mt-1 text-xs text-muted">
+            {setsToday(s) === 0
+              ? "no sets yet"
+              : `across ${setsToday(s)} set${setsToday(s) === 1 ? "" : "s"}`}
+          </p>
+        </div>
+        <Link
+          href={`/set?v=${vary}`}
+          className="display w-full shrink-0 rounded-lg bg-you px-6 py-3.5 text-center text-lg text-ink transition hover:brightness-110 sm:w-auto"
+        >
+          Log a set
+        </Link>
+      </section>
+      <p className="mt-2 text-xs leading-relaxed text-muted">
+        No target, no countdown, no screens between sets — it starts when you get into a plank and
+        stops ten seconds after your last rep. Small sets through the day is how volume actually
+        accumulates.
       </p>
 
       <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
@@ -135,9 +166,45 @@ export default function TrainPage() {
         </p>
       </section>
 
+      <section className="mt-10">
+        <ProgressChart state={s} />
+      </section>
+
+      {hint && (
+        <p className="mt-6 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm leading-relaxed text-gold">
+          {hint}
+        </p>
+      )}
+
+      <section className="mt-10">
+        <h2 className="display text-2xl">Only pushing</h2>
+        <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">
+          Push-ups on their own build an imbalance — chest and front shoulder get strong while the
+          upper back doesn&apos;t. If this is most of your training, put a pulling movement next to
+          it: rows under a table, a doorway pull, or a bar if you have one. This app can&apos;t
+          count those, and it isn&apos;t going to pretend the imbalance isn&apos;t there.
+        </p>
+      </section>
+
       {s.history.length > 0 && (
         <section className="mt-10">
-          <h2 className="display text-2xl">Recent</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="display text-2xl">Recent</h2>
+            <button
+              onClick={() => {
+                const blob = new Blob([toCsv(s)], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "pushup-gg.csv";
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 2000);
+              }}
+              className="display rounded-md border border-line px-3 py-1 text-xs text-muted transition hover:text-text"
+            >
+              Export CSV
+            </button>
+          </div>
           <ol className="mt-3 space-y-1.5">
             {[...s.history]
               .slice(-8)

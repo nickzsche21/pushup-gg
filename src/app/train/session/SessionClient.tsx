@@ -256,7 +256,7 @@ export default function SessionClient() {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center pb-8">
             <p
               key={reps}
-              className="display pop text-[7rem] leading-[0.8] text-white"
+              className="display pop text-[5.5rem] leading-[0.8] text-white sm:text-[7rem]"
               style={{ textShadow: "0 6px 40px rgba(0,0,0,0.85)" }}
             >
               {remaining}
@@ -326,7 +326,7 @@ export default function SessionClient() {
       {phase === "rest" && (
         <Overlay>
           <p className="display text-xs tracking-[0.2em] text-muted">REST</p>
-          <p className="display tabular text-[7rem] leading-none text-you">{restLeft}</p>
+          <p className="display tabular text-[5.5rem] leading-none text-you sm:text-[7rem]">{restLeft}</p>
           <p className="mt-1 text-muted">
             Set {setIndex + 2} of {session.sets.length} — {session.sets[setIndex + 1]?.reps} reps
           </p>

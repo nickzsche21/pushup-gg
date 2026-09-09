@@ -58,6 +58,27 @@ increase"* — 24,760 views. *"Why is 40 pushups a day not doing anything?"* —
 push-up, and every one of these apps refuses to count anything else. → knee and
 incline variations, with the body line measured to the right joint.
 
+**The unit is the day, not the session.** From the thread of someone who
+actually did it: *"On Saturday I did 527 push-ups. A set of 30 in the morning,
+then 400 on the soccer field — in 16 sets of 25, every five minutes."* ·
+*"Once you can do 100 in a set, that's just ten sets throughout the day."* ·
+*"All that matters is area under the curve."* → [log a set](#log-a-set), and a
+running daily total rather than a session score.
+
+**Administrative faff is the stated reason people quit.** *"I have fallen off
+several wagons — Convict Conditioning, the Busy Dad Routine — generally because,
+although fun and encouraging initially, they are just too much faff from an
+administrative perspective."* → no briefing screen, no target, no navigation
+between sets.
+
+**People keep spreadsheets.** One commenter asked another for the exact columns
+of his. → a progress chart and a CSV export button.
+
+**And a direct challenge to this whole product**, which deserved an answer
+rather than a feature: *"You're fixating on the wrong thing (form) as a
+self-imposed barrier to progress. Just do what you can, do them daily, forget
+the form."* → see [On being strict about it](#on-being-strict-about-it).
+
 **Also:** elbow flare is a named fault nobody detects; counting *down* toward a
 target is what gets people through a set (*"chunking and counting down helped go
 through them"*); the local-only processing was praised without being asked
@@ -108,6 +129,55 @@ animate the on-screen gauge.
 Depth credit comes from the **second**-lowest raw reading of the rep, so one bad
 frame cannot manufacture a rep and a genuine turnaround isn't clipped by the
 filter.
+
+## Log a set
+
+The main loop. No target, no countdown, no briefing, no screens between sets:
+the camera stays live, it starts when you hold a plank, and it stops ten seconds
+after your last rep. "Another set" drops straight back into position without
+tearing the camera down.
+
+Above it, all day, sits one number: **today's total, across every set**. That is
+the number the person who did ten thousand push-ups was actually tracking, and
+it is a different shape of product from a session score.
+
+Depth, strictness, variation and the coach are behind one line of text you only
+open if you want them.
+
+## On being strict about it
+
+There is a good argument against this entire app, and people who have done ten
+thousand push-ups make it: fixating on form is a self-imposed barrier, area
+under the curve is all that matters, do them daily and the quality follows.
+
+So strictness is a setting, not a sermon:
+
+| | Depth | Body line | Tempo | Flare |
+|---|---|---|---|---|
+| **Casual** | 105° | 140° | 300ms | warn only |
+| **Ranked** | 95° | 152° | 380ms | warn only |
+| **Strict** | 85° | 160° | 450ms | **voids the rep** |
+
+Casual exists for exactly that argument — if the habit is the thing you're
+building, take it and ignore everything else here. Ranked is stricter because a
+shared ladder is meaningless when everyone marks their own homework. They answer
+different questions and both are real.
+
+## Progress, and your data back
+
+Daily volume as bars with your best single set drawn over the top. Two questions
+get confused constantly — "am I doing more work" and "am I getting stronger" —
+and only the second one stalls. Plotting them together is what makes a plateau
+visible instead of a vibe.
+
+There's an **Export CSV** button. Nothing here is worth trapping.
+
+## Install it
+
+There's a web manifest and icons, so it installs to a home screen and opens
+full-screen with no browser chrome eating the count. The shortcut menu goes
+straight into a set. The floor next to a propped-up phone is where this is meant
+to be used, not a desk.
 
 ## It talks to you
 
@@ -174,6 +244,13 @@ split as a stacked bar. Then averages, total time under tension, and exactly one
 thing to fix — chosen by whichever signal is furthest out of line, whether
 that's a repeated no-rep reason, a rushed descent, flared elbows, or depth
 drifting shallower as the set wears on.
+
+## One honest caveat about push-ups
+
+Push-ups on their own build an imbalance — chest and front shoulder get strong
+while the upper back doesn't. If this app is most of your training, put a
+pulling movement next to it. It can't count those, and it isn't going to pretend
+the problem isn't there.
 
 ## Ratings
 
@@ -279,6 +356,9 @@ reps and dropped hips so the no-rep path is visible.
   about 5° of extra depth on a normal rep and more on a fast one.
 - **Rate limiting.** There isn't any. Nothing stops a script from submitting a
   stream of plausible matches; the floor only bounds what each one is worth.
+- **Training data is local.** Streaks, daily totals and the progress chart live
+  in this browser's storage. Clearing site data loses them — export the CSV.
+- **Push only.** See above. This is half a training programme by construction.
 
 ## Layout
 
@@ -289,13 +369,15 @@ src/lib/pose/variations.ts   seven variations and their gate overrides
 src/lib/pose/simulator.ts    synthetic athlete, shared by demo mode and tests
 src/lib/coach/audio.ts       spoken counts, no-rep reasons, tones
 src/lib/coach/framing.ts     camera setup diagnosis
-src/lib/training.ts          progression, plans, streaks
+src/lib/training.ts          progression, plans, streaks, daily totals, CSV
 src/lib/elo.ts               margin-weighted ratings, plausibility floor
 src/lib/net/match.ts         lobby, pairing, match channel, ghosts
 src/lib/shareCard.ts         the 1080×1920 result card
 src/components/CameraStage   camera, pose loop, overlay painting
 src/components/FormReport    per-rep depth and tempo, and the one thing to fix
-scripts/test-counter.ts      60 assertions over the above
+src/components/ProgressChart daily volume against best single set
+src/app/set/                 the zero-friction daily loop
+scripts/test-counter.ts      77 assertions over the above
 ```
 
 ## Licence
