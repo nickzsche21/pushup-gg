@@ -17,6 +17,7 @@ it is edited after the fact. Nobody is really being judged. The interesting
 version is the one where a machine watches you and refuses to count the rep you
 cut short, in front of an opponent, while it's happening.
 
+ yo sup gng
 So the whole product is the referee.
 
 ## What people said about the alternatives
